@@ -106,28 +106,25 @@ async def analyze_file(file: UploadFile = File(...)):
     Unggah CSV atau Excel berisi data media sosial.
     Minimal harus ada kolom teks (content/text/teks/komentar/...).
     Mengembalikan ringkasan analisis siap dipakai dashboard.
-    """
-    import pandas as pd  # impor di sini agar startup cepat
 
+    Dibaca tanpa pandas (stdlib csv + openpyxl) agar instalasi ringan & bebas
+    kompilasi di Python versi apa pun.
+    """
     raw = await file.read()
     name = (file.filename or "").lower()
 
     try:
         if name.endswith((".xlsx", ".xls")):
-            df = pd.read_excel(io.BytesIO(raw))
+            rows = _read_excel(raw)
         else:
-            # coba beberapa encoding & pemisah umum
-            try:
-                df = pd.read_csv(io.BytesIO(raw))
-            except Exception:
-                df = pd.read_csv(io.BytesIO(raw), sep=";", encoding="latin-1")
+            rows = _read_csv(raw)
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Gagal membaca file: {e}")
 
-    if df.empty:
+    if not rows:
         raise HTTPException(status_code=400, detail="File tidak berisi data.")
 
-    cols = list(df.columns)
+    cols = list(rows[0].keys())
     text_col = _pick(cols, TEXT_COLS)
     if not text_col:
         raise HTTPException(
@@ -141,27 +138,35 @@ async def analyze_file(file: UploadFile = File(...)):
     likes_col = _pick(cols, LIKES_COLS)
     shares_col = _pick(cols, SHARES_COLS)
 
-    texts = df[text_col].fillna("").astype(str).tolist()
+    texts = [str(r.get(text_col) or "") for r in rows]
 
     # Sentimen & emosi per baris
     sent_counts = {"positif": 0, "netral": 0, "negatif": 0}
     emotion_counts: dict = {}
+    platform_counter: dict = {}
+    authors: set = set()
     sample_posts = []
 
-    for i, t in enumerate(texts):
+    for i, (t, row) in enumerate(zip(texts, rows)):
         label, score = analysis.analyze_sentiment(t)
         emo = analysis.detect_emotion(t)
         sent_counts[label] += 1
         emotion_counts[emo] = emotion_counts.get(emo, 0) + 1
 
+        if platform_col:
+            pf = str(row.get(platform_col) or "—")
+            platform_counter[pf] = platform_counter.get(pf, 0) + 1
+        if author_col:
+            authors.add(str(row.get(author_col) or ""))
+
         if len(sample_posts) < 20:
             sample_posts.append({
-                "platform": str(df[platform_col].iloc[i]) if platform_col else "—",
-                "author": str(df[author_col].iloc[i]) if author_col else "anonim",
+                "platform": str(row.get(platform_col)) if platform_col else "—",
+                "author": str(row.get(author_col)) if author_col else "anonim",
                 "content": t[:280],
-                "date": str(df[date_col].iloc[i]) if date_col else "",
-                "likes": int(_to_int(df[likes_col].iloc[i])) if likes_col else 0,
-                "shares": int(_to_int(df[shares_col].iloc[i])) if shares_col else 0,
+                "date": str(row.get(date_col)) if date_col else "",
+                "likes": _to_int(row.get(likes_col)) if likes_col else 0,
+                "shares": _to_int(row.get(shares_col)) if shares_col else 0,
                 "sentiment": label,
                 "emotion": emo,
             })
@@ -171,11 +176,10 @@ async def analyze_file(file: UploadFile = File(...)):
         k: round(v / total * 100, 1) for k, v in sent_counts.items()
     }
 
-    # Distribusi platform
-    platform_counts = []
-    if platform_col:
-        vc = df[platform_col].fillna("—").astype(str).value_counts()
-        platform_counts = [{"name": str(k), "value": int(v)} for k, v in vc.items()]
+    platform_counts = [
+        {"name": k, "value": v}
+        for k, v in sorted(platform_counter.items(), key=lambda x: -x[1])
+    ]
 
     keywords = analysis.top_keywords(texts, n=30)
     topics = analysis.simple_topics(keywords, k=5)
@@ -185,7 +189,7 @@ async def analyze_file(file: UploadFile = File(...)):
     return {
         "summary": {
             "totalPosts": total,
-            "uniqueAuthors": int(df[author_col].nunique()) if author_col else None,
+            "uniqueAuthors": len(authors) if author_col else None,
             "textColumn": text_col,
             "detectedColumns": {
                 "platform": platform_col, "author": author_col,
@@ -200,6 +204,48 @@ async def analyze_file(file: UploadFile = File(...)):
         "topics": topics,
         "samplePosts": sample_posts,
     }
+
+
+def _read_csv(raw: bytes) -> List[dict]:
+    """Baca CSV dari bytes; deteksi encoding & pemisah secara sederhana."""
+    import csv
+
+    text = None
+    for enc in ("utf-8-sig", "utf-8", "latin-1"):
+        try:
+            text = raw.decode(enc)
+            break
+        except UnicodeDecodeError:
+            continue
+    if text is None:
+        text = raw.decode("utf-8", errors="ignore")
+
+    sample = text[:4096]
+    delimiter = ";" if sample.count(";") > sample.count(",") else ","
+    reader = csv.DictReader(io.StringIO(text), delimiter=delimiter)
+    return [dict(r) for r in reader]
+
+
+def _read_excel(raw: bytes) -> List[dict]:
+    """Baca sheet pertama Excel (.xlsx) via openpyxl menjadi list of dict."""
+    from openpyxl import load_workbook
+
+    wb = load_workbook(io.BytesIO(raw), read_only=True, data_only=True)
+    ws = wb.active
+    rows_iter = ws.iter_rows(values_only=True)
+    try:
+        header = [str(h) if h is not None else f"col{i}"
+                  for i, h in enumerate(next(rows_iter))]
+    except StopIteration:
+        return []
+    out = []
+    for r in rows_iter:
+        if r is None or all(c is None for c in r):
+            continue
+        out.append({header[i]: r[i] if i < len(r) else None
+                    for i in range(len(header))})
+    return out
+
 
 
 def _to_int(v) -> int:
