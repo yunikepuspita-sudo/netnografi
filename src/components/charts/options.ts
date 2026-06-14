@@ -266,3 +266,84 @@ export function sankeyOption(): EChartsOption {
     ],
   };
 }
+
+// --------------------------------------------------------------------------- #
+// Builder berbasis DATA (untuk hasil nyata dari backend, bukan mock)
+// --------------------------------------------------------------------------- #
+
+export function donutFromData(
+  s: { positif: number; netral: number; negatif: number }
+): EChartsOption {
+  return sentimentDonutOption(s);
+}
+
+export function horizontalBarFromData(
+  items: { name: string; value: number }[]
+): EChartsOption {
+  const sorted = [...items].sort((a, b) => a.value - b.value);
+  return {
+    ...base,
+    grid: { left: 110, right: 30, top: 10, bottom: 20 },
+    color: ["#327dff"],
+    tooltip: { ...base.tooltip, trigger: "axis", axisPointer: { type: "shadow" } },
+    xAxis: { type: "value", ...axisStyle },
+    yAxis: { type: "category", data: sorted.map((p) => p.name), ...axisStyle },
+    series: [
+      {
+        type: "bar",
+        data: sorted.map((p) => p.value),
+        itemStyle: { borderRadius: [0, 6, 6, 0] },
+        barWidth: "60%",
+      },
+    ],
+  };
+}
+
+export function emotionBarFromData(
+  items: { name: string; value: number }[]
+): EChartsOption {
+  return {
+    ...base,
+    grid: { left: 80, right: 30, top: 10, bottom: 20 },
+    color: ["#a855f7"],
+    tooltip: { ...base.tooltip, trigger: "axis", axisPointer: { type: "shadow" } },
+    xAxis: { type: "value", ...axisStyle },
+    yAxis: {
+      type: "category",
+      data: [...items].reverse().map((e) => e.name),
+      ...axisStyle,
+    },
+    series: [
+      {
+        type: "bar",
+        data: [...items].reverse().map((e) => e.value),
+        itemStyle: { borderRadius: [0, 6, 6, 0] },
+        barWidth: "55%",
+      },
+    ],
+  };
+}
+
+export function wordCloudFromData(
+  items: { name: string; value: number }[]
+): EChartsOption {
+  const wordCloudSeries = {
+    type: "wordCloud",
+    shape: "circle",
+    width: "100%",
+    height: "100%",
+    sizeRange: [12, 52],
+    rotationRange: [-45, 45],
+    gridSize: 8,
+    drawOutOfBound: false,
+    textStyle: {
+      color: () => palette[Math.floor(Math.random() * palette.length)],
+    },
+    emphasis: { textStyle: { fontWeight: "bold" } },
+    data: items.length ? items : [{ name: "tidak ada data", value: 1 }],
+  };
+  return {
+    tooltip: { ...base.tooltip },
+    series: [wordCloudSeries] as unknown as EChartsOption["series"],
+  };
+}

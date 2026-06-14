@@ -7,6 +7,7 @@ export interface NavItem {
 
 export const navItems: NavItem[] = [
   { href: "/", label: "Dashboard", icon: "📊" },
+  { href: "/unggah", label: "Unggah & Analisis", icon: "⬆️", layer: "Live" },
   { href: "/pengumpulan-data", label: "Pengumpulan Data", icon: "🛰️", layer: "Layer 1" },
   { href: "/pembersihan", label: "Pembersihan Data", icon: "🧹", layer: "Layer 2" },
   { href: "/analisis", label: "AI Netnography Engine", icon: "🧠", layer: "Layer 3" },
