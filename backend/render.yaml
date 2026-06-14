@@ -1,0 +1,13 @@
+# Konfigurasi deploy gratis ke Render (https://render.com)
+# Cara pakai: di Render -> New -> Blueprint -> pilih repo ini.
+# Render akan membaca file ini otomatis.
+services:
+  - type: web
+    name: netra-ai-api
+    runtime: python
+    rootDir: backend
+    plan: free
+    buildCommand: "pip install -r requirements.txt"
+    startCommand: "uvicorn main:app --host 0.0.0.0 --port $PORT"
+    healthCheckPath: /health
+    autoDeploy: true
